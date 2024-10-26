@@ -3,6 +3,7 @@ from flask_marshmallow import Marshmallow
 from flask_sqlalchemy import SQLAlchemy
 from marshmallow import fields,validate
 from marshmallow import ValidationError
+from datetime import datetime
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = "mysql+mysqlconnector://root:a3$pa202O.@localhost/ecommerce"
@@ -80,9 +81,14 @@ class Order (db.Model):
     id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'))
     product_id = db.Column(db.Integer, db.ForeignKey('products.id'))
+    order_date = db.Column(db.DateTime, default=datetime.utcnow)
     quantity = db.Column(db.Integer)
     customer = db.relationship('Customer', backref='orders') # many to one
     products = db.relationship('Product', secondary=order_product, backref=db.backref('orders'))  # many to many
+
+@app.route('/')
+def home():
+    return "Welcome to the E-commerce API"
 
 @app.route('/customer', methods=['POST'])
 def add_customer():
@@ -208,6 +214,22 @@ def get_products():
     products = Product.query.all()
     return products_schema.jsonify(products)
 
+@app.route('/product/<int:id>/stock', methods=['PATCH'])
+def adjust_product_stock(id):
+    product = Product.query.get(id)
+    if not product:
+        return jsonify({"message": "Product not found"}), 404
+    try:
+        data = request.json
+        if 'stock' in data:
+            product.stock += data['stock']
+            db.session.commit()
+            return jsonify({"message": "Stock level adjusted successfully"}), 200
+        else:
+            return jsonify({"message": "Invalid input"}), 400
+    except KeyError:
+        return jsonify({"message": "Invalid input"}), 400
+
 @app.route('/order_product', methods=['POST'])
 def order_product_by_name():
     try:
@@ -226,12 +248,38 @@ def order_product_by_name():
             return jsonify({"message": "Product not found"}), 404
 
         # Create a new order
-        new_order = Order(customer_id=customer_id, products=[product])
+        new_order = Order(customer_id=customer_id, products=[product], order_date=datetime.utcnow())
         db.session.add(new_order)
         db.session.commit()
 
         return order_schema.jsonify(new_order), 201
     except KeyError:
         return jsonify({"message": "Invalid input"}), 400
+    
+@app.route('/orders/date/<string:order_date>', methods=['GET'])
+def get_orders_by_date(order_date):
+    try:
+        date = datetime.strptime(order_date, '%Y-%m-%d')
+        
+        orders = Order.query.filter(db.func.date(Order.order_date) == date.date()).all()
+        
+        if not orders:
+            return jsonify({"message": "No orders found for the specified date"}), 404
+        
+        return orders_schema.jsonify(orders), 200
+    except ValueError:
+        return jsonify({"message": "Invalid date format. Use YYYY-MM-DD"}), 400
+    
+@app.route('/order/<int:id>', methods=['GET'])
+def get_order(id):
+    order = Order.query.get(id)
+    if not order:
+        return jsonify({"message": "Order not found"}), 404
+    return order_schema.jsonify(order)
 
+with app.app_context():
+    db.create_all()
+
+if __name__ == '__main__':
+    app.run(debug=True)
 
