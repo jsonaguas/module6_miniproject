@@ -1,14 +1,54 @@
 from flask import Flask, request, jsonify
 from flask_marshmallow import Marshmallow
 from flask_sqlalchemy import SQLAlchemy
-from marshmallow import fields,validate
+from marshmallow import fields, validate
 from marshmallow import ValidationError
 from datetime import datetime
+from flask_cors import CORS
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = "mysql+mysqlconnector://root:a3$pa202O.@localhost/ecommerce"
+CORS(app)
 ma = Marshmallow(app)
 db = SQLAlchemy(app)
+
+# Association table for many-to-many relationship between orders and products
+order_product = db.Table('order_product',
+    db.Column('order_id', db.Integer, db.ForeignKey('orders.id'), primary_key=True),
+    db.Column('product_id', db.Integer, db.ForeignKey('products.id'), primary_key=True)
+)
+
+class Customer(db.Model):
+    __tablename__ = "customers"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50))
+    email = db.Column(db.String(50))
+    phone = db.Column(db.String(20))
+    account = db.relationship('CustomerAccount', backref='customer', uselist=False)
+
+class CustomerAccount(db.Model):
+    __tablename__ = "customer_accounts"
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(50))
+    password = db.Column(db.String(50))
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'))
+
+class Product(db.Model):
+    __tablename__ = "products"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50))  
+    price = db.Column(db.Float) 
+    stock = db.Column(db.Integer, nullable=False, default=0)
+    orders = db.relationship('Order', secondary=order_product, back_populates='products')
+
+class Order(db.Model):
+    __tablename__ = "orders"
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'))
+    order_date = db.Column(db.DateTime, default=datetime.utcnow)
+    quantity = db.Column(db.Integer)
+    customer = db.relationship('Customer', backref='orders')
+    products = db.relationship('Product', secondary=order_product, back_populates='orders')
 
 class CustomerSchema(ma.Schema):
     name = fields.String(required=True, validate=validate.Length(min=1))
@@ -46,60 +86,30 @@ order_schema = OrderSchema()
 orders_schema = OrderSchema(many=True)
 
 
-
-order_product = db.Table('order_product',
-    db.Column('order_id', db.Integer, db.ForeignKey('orders.id'), primary_key=True),
-    db.Column('product_id', db.Integer, db.ForeignKey('products.id'), primary_key=True)
-)
-
-class Customer (db.Model):
-    __tablename__ = "customers"
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(50))
-    email = db.Column(db.String(50))
-    phone = db.Column(db.String(50))
-    orders = db.relationship('Order', backref='customer') # one to many
-
-class CustomerAccount (db.Model):
-    __tablename__ = "customer_accounts"
-    id = db.Column(db.Integer, primary_key=True)
-    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'))
-    username = db.Column(db.String(50))
-    password = db.Column(db.String(50))
-    customer = db.relationship('Customer', backref=db.backref('account', uselist=False)) # one to one
-
-class Product (db.Model):
-    __tablename__ = "products"
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(50))  
-    price = db.Column(db.Float) 
-    stock = db.Column(db.Integer, nullable=False, default=0)
-    orders = db.relationship('Order', secondary=order_product, backref=db.backref('products'))  # many to many
-
-class Order (db.Model):
-    __tablename__ = "orders"
-    id = db.Column(db.Integer, primary_key=True)
-    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'))
-    product_id = db.Column(db.Integer, db.ForeignKey('products.id'))
-    order_date = db.Column(db.DateTime, default=datetime.utcnow)
-    quantity = db.Column(db.Integer)
-    customer = db.relationship('Customer', backref='orders') # many to one
-    products = db.relationship('Product', secondary=order_product, backref=db.backref('orders'))  # many to many
-
 @app.route('/')
 def home():
     return "Welcome to the E-commerce API"
 
+# @app.route('/customer', methods=['POST'])
+# def add_customer():
+#     try:
+#         customer = customer_schema.load(request.json)
+#         db.session.add(customer)
+#         db.session.commit()
+#         return jsonify(customer_schema.dump(customer)), 201
+#     except ValidationError as err:
+#         return jsonify(err.messages), 400
+
 @app.route('/customer', methods=['POST'])
 def add_customer():
     try:
-        customer = customer_schema.load(request.json)   
+        customer_data = customer_schema.load(request.json)
+        customer = Customer(**customer_data)
+        db.session.add(customer)
+        db.session.commit()
+        return jsonify(customer_schema.dump(customer)), 201
     except ValidationError as err:
         return jsonify(err.messages), 400
-    new_customer = Customer(name=customer['name'], email=customer['email'], phone=customer['phone'])
-    db.session.add(new_customer)
-    db.session.commit()
-    return jsonify("Customer added successfully"), 201
 
 @app.route('/customer', methods=['GET'])
 def get_customers():
@@ -177,7 +187,7 @@ def add_product():
         product = product_schema.load(request.json)   
     except ValidationError as err:
         return jsonify(err.messages), 400
-    new_product = Product(name=product['name'], price=product['price'])
+    new_product = Product(name=product['name'], price=product['price'], stock=product['stock'])
     db.session.add(new_product)
     db.session.commit()
     return jsonify("Product added successfully"), 201
@@ -281,5 +291,10 @@ with app.app_context():
     db.create_all()
 
 if __name__ == '__main__':
+    try:
+        db.create_all()
+        print("Database connected and tables created successfully.")
+    except Exception as e:
+        print(f"Error connecting to the database: {e}")
     app.run(debug=True)
 
