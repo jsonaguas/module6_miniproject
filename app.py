@@ -72,9 +72,12 @@ class ProductSchema(ma.Schema):
         fields = ('id', 'name', 'price', 'stock')
 
 class OrderSchema(ma.Schema):
+    customer_id = fields.Integer(required=True)
+    product_ids = fields.List(fields.Integer(), required=True)
     quantity = fields.Integer(required=True)
+    order_date = fields.DateTime(required=True)
     class Meta:
-        fields = ('id', 'customer_id', 'product_id', 'quantity')
+        fields = ('id', 'customer_id', 'product_ids', 'quantity', 'order_date')
 
 customer_schema = CustomerSchema()
 customers_schema = CustomerSchema(many=True)
@@ -240,32 +243,34 @@ def adjust_product_stock(id):
     except KeyError:
         return jsonify({"message": "Invalid input"}), 400
 
-@app.route('/order_product', methods=['POST'])
-def order_product_by_name():
-    try:
-        data = request.json
-        customer_id = data['customer_id']
-        product_name = data['product_name']
+@app.route('/order', methods=['POST'])
+def add_order():
+        try:
+                order_data = request.json
+                customer_id = order_data.get('customer_id')
+                product_ids = order_data.get('product_ids')
+                quantity = order_data.get('quantity')
+                order_date = datetime.strptime(order_data.get('order_date'), '%Y-%m-%d %H:%M:%S')
 
-        # Retrieve the customer
-        customer = Customer.query.get(customer_id)
-        if not customer:
-            return jsonify({"message": "Customer not found"}), 404
+                if not customer_id or not product_ids or not quantity or not order_date:
+                    return jsonify({"message": "Invalid input"}), 400
 
-        # Retrieve the product by name
-        product = Product.query.filter_by(name=product_name).first()
-        if not product:
-            return jsonify({"message": "Product not found"}), 404
+                # Create the Order object
+                order = Order(customer_id=customer_id, quantity=quantity, order_date=order_date)
 
-        # Create a new order
-        new_order = Order(customer_id=customer_id, products=[product], order_date=datetime.utcnow())
-        db.session.add(new_order)
-        db.session.commit()
+                # Add products to the order
+                for product_id in product_ids:
+                    product = Product.query.get(product_id)
+                    if product:
+                        order.products.append(product)
 
-        return order_schema.jsonify(new_order), 201
-    except KeyError:
-        return jsonify({"message": "Invalid input"}), 400
-    
+                db.session.add(order)
+                db.session.commit()
+
+                return order_schema.jsonify(order), 201
+        except Exception as e:
+                return jsonify({"message": str(e)}), 400
+
 @app.route('/orders/date/<string:order_date>', methods=['GET'])
 def get_orders_by_date(order_date):
     try:
