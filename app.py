@@ -88,7 +88,6 @@ products_schema = ProductSchema(many=True)
 order_schema = OrderSchema()
 orders_schema = OrderSchema(many=True)
 
-
 @app.route('/')
 def home():
     return "Welcome to the E-commerce API"
@@ -250,7 +249,7 @@ def add_order():
                 customer_id = order_data.get('customer_id')
                 product_ids = order_data.get('product_ids')
                 quantity = order_data.get('quantity')
-                order_date = datetime.strptime(order_data.get('order_date'), '%Y-%m-%d %H:%M:%S')
+                order_date = datetime.strptime(order_data.get('order_date'), '%Y-%m-%d')
 
                 if not customer_id or not product_ids or not quantity or not order_date:
                     return jsonify({"message": "Invalid input"}), 400
@@ -291,6 +290,11 @@ def get_order(id):
     if not order:
         return jsonify({"message": "Order not found"}), 404
     return order_schema.jsonify(order)
+
+@app.route('/orders', methods=['GET'])
+def get_orders():
+    orders = Order.query.all()
+    return orders_schema.jsonify(orders)
 
 with app.app_context():
     db.create_all()
